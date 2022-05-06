@@ -1,0 +1,684 @@
+---
+title: "Spatial and Statistical Analysis of GEDI 2A data in R"
+output: 
+  html_document: 
+    highlight: pygments
+---
+
+<style type="text/css">
+
+body{ /* Normal  */
+      font-size: 13px;
+      font-family: system-ui;
+      color:	slategray;
+  }
+td {  /* Table  */
+  font-size: 8px;
+}
+
+h1.title {
+  font-size: 20px
+  font-weight: bold;
+  font-family: system-ui;
+}
+h1 { /* Header 1 */
+  font-size: 20px;
+  font-weight: bold;
+  font-family: system-ui;
+
+}
+h2 { /* Header 2 */
+  font-size: 16px;
+  color:	slategray;
+  font-weight: bold;
+  font-family: system-ui;
+}
+h3 { /* Header 3 */
+  font-size: 14px;
+  color: 	slategray;
+  font-weight: bold;
+  font-family: system-ui;
+}
+h4 { /* Header 3 */
+  font-size: 12px;
+  color: 	slategray;
+  font-weight: bold;
+  font-family: system-ui;
+}
+
+h5 { /* Header 5 */
+  font-size: 12px;
+  color: 	slategray;
+  font-weight: bold;
+  font-family: system-ui;
+}
+code.r{ /* Code block */
+    font-size: 12px;
+}
+pre { /* Code block - determines code spacing between lines */
+    font-size: 12px;
+}
+</style>
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+**Author**: Hyeonmin Kang 
+
+**Operating system**: Ubuntu 20.04.4 LTS
+
+**R version**: 4.2.0 (2022-04-22)
+
+**Last Updated**: 06/05/2022
+
+**Objective**: (1) demonstrating how to get the URL for downloading NASA's Global Ecosystem Dynamics Investigation (GEDI) Data directly from the LP DAAC Data Pool, using NASA's Common Metadata Repository (CMR). (2) visualizing and analyzing NASA's Global Ecosystem Dynamics Investigation (GEDI) 2A Data spatially and statistically. (3) detecting the forest disturbance by processing GEDI 2A DATA. 
+
+**Data Provider**: (1) https://land.copernicus.eu/pan-european/high-resolution-layers/forests (2) https://sentinel.esa.int/web/sentinel/user-guides/sentinel-2-msi/product-types/level-2a
+
+
+## 1. Install and load required packages 
+
+```{r echo=T, results='hide', message=F, warning=F}
+# install required packages (if not installed yet)
+packagelist <- c("glue", "jsonlite","dplyr","ggplot2","ggthemes","raster","sf","tidyverse","devtools","rGEDI", "ggstatsplot", "sp","leaflet","leafsync","hdf5r","data.table","ggpubr")
+new.packages <- packagelist[!(packagelist %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+
+# load required packages
+lapply(packagelist, require, character.only = TRUE)
+
+# If rGEDI is unavailable to install, use this development version of install line. 
+if ("rGEDI" %in% rownames(installed.packages()) == FALSE) {devtools::install_git("https://github.com/carlos-alberto-silva/rGEDI", dependencies = TRUE)}
+```
+### 2. Set up output directory and query parameter. 
+
+```{r echo=T, results='hide', message=F, warning=F}
+
+#Set output dir for downloading the files
+outdir <- getwd()
+# set the bounding box 
+bbox <- "8.877,51.465,9.921,51.762" #lon_min, lat_min, lon_max, lat_max 
+
+# Set each value of the bounding box as one variable
+xmin <- 8.877 #lon_min
+xmax <- 9.9219 #lon_max
+ymin <- 51.465 #lat_min
+ymax <- 51.762 #lat_max 
+
+# name of GEDI data we need 
+# Here we need only GEDI2A data.
+#GEDI1B <- 'GEDI01_B.002' # geolocation product 
+GEDI2A <- 'GEDI02_A.002' # Full-waveform product
+#GEDI2B <- 'GEDI02_B.002' # Elevation and Height Metrics product
+
+# dates that we are looking for
+datetime_v <- c("2019.10.28", "2019.11.06", "2019.11.12", "2019.11.23", "2019.11.24")
+
+```
+
+### 3. Load polygons and raster data. 
+
+
+```{r echo=T, results='hide', message=F, warning=F}
+# Import forest polygons as sf object 
+# Data Provider (1) Shapefile converted from forest type raster data inside of bounding box. 
+angiosperms <- sf::st_read("forest1_vec_fixed.shp") # vector of broad-leaved forests
+gymnosperms <- sf::st_read("forest2_vec_fixed.shp") # vector of coniferous forests
+
+# Combine two sf objects
+forests <- rbind(angiosperms,gymnosperms)
+
+# Data Provider (2) median NDVI (Normalized Difference Vegetation Index) image of Sentinel-2 (May to October, 2019) 
+ndvi_19 <- raster::brick("2019s2_clipped_ndvi.tif")
+
+# Above median NDVI is converted to shapefile and less than 0.5 NDVI values are extracted inside of forest area. 
+forest_disturbance <- sf::st_read("ndvi19_disturbance_vec_0_fixed.shp")
+```
+
+
+## 4. Download GEDI data URL 
+Here, we create a function to query CMR. 
+
+```{r echo=T, results='hide', message=F, warning=F}
+
+# Currently, it is not available to download GEDI data directly from R and save it in the wished directory.
+# So we have to get the URL and download it by ourselves.
+# Get the URLs and use them to download the data 
+request_gedi_url <- function(product, bbox, datetime, print = TRUE) {
+  # Define the base NASA's Common Metadata Repository (CMR) granule search URL, 
+  # including LPDAAC provider name and max page size (2000 is the max allowed)
+  cmr <- "https://cmr.earthdata.nasa.gov/search/granules.json?pretty=true&provider=LPDAAC_ECS&page_size=2000&concept_id="
+  # Create a vector where GEDI's version 2 data products and CMR Concept ID are saved. 
+  concept_ids <- c('GEDI01_B.002' = 'C1908344278-LPDAAC_ECS', 
+                   'GEDI02_A.002' = 'C1908348134-LPDAAC_ECS', 
+                   'GEDI02_B.002' = 'C1908350066-LPDAAC_ECS')
+  # CMR uses pagination for queries with more features returned than the page size
+  page <- "1"
+  # Get CMR granule search endpoint with product concept ID, bbox & page number
+  url <- glue::glue("{cmr}{concept_ids[product]}&bounding_box={bbox}&pageNum={page}")
+  # Return the CMR granule as json
+  cmr_json <- jsonlite::fromJSON(url) 
+  # Find the download links 
+  raw_links  <-  cmr_json$feed$entry$links 
+  # Search the download link for the date that we need. 
+  for (i in 1:length(raw_links)) { 
+    # href: an attribute of the anchor tag
+    href <- raw_links[[i]]["href"][1,1]
+    # Stop the loop when the date matches 
+    if (grepl(as.character(datetime), href, fixed = TRUE)){ 
+      final_url <- href
+      break
+    } 
+  }
+  # Set the conditional logical print argument. 
+  if (print == TRUE) {
+    print(final_url) 
+    return(final_url)}
+  if (print == FALSE) return(final_url)
+
+}
+
+# WARNING:: 1B and 2A data are bigger than 1 GB. 
+# I recommend using the data I already downloaded to protect your laptop space. 
+```
+
+This is an example to show how to use the function. **WARNING: WE DO NOT NEED THIS DATA!**
+```{r}
+# Name of GEDI data we need
+GEDI2B <- 'GEDI02_B.002' 
+# Set the date time (this is just an example datetime to show how to use the below function)
+datetime_ex = "2019.11.02"
+# Read GEDI level2B data (h5 file)
+GEDI2B_url <- request_gedi_url(GEDI2B, bbox, datetime_ex, print = TRUE)
+```
+
+## 5. Read and clip GEDI data
+
+Get URLs of downloading GEDI data using for loop. If you want, download the data by yourself and save it in your *outdir*. Next, use the option 1) code. 
+
+If you do not want to download all the GEDI data by yourself then skip option 1) and go to option 2)
+
+**WARNING!! size of all GEDI data below are more than 10 GB. Check your storage space before you curse me. **
+
+```{r}
+for (d in datetime_v){
+  request_gedi_url(GEDI2A, bbox, d, print = TRUE)
+}
+```
+
+#### Option 1) 
+If you downloaded all the GEDI by yourself by using above code, please run the next code block. This for loop load the GEDI data you saved in your directory and clip it by bounding box. This might take more than 10 minutes, depending on your computer health and ability. 
+
+**WARNING!! size of all GEDI data below are more than 10 GB. Check your storage space before you curse me. **
+
+```{r eval=FALSE}
+level2A_dt <- NULL # the dataframe to be filled
+for (d in datetime_v){
+  GEDI2A_link <-request_gedi_url(GEDI2A, bbox, d,print = FALSE)
+  GEDI2A_filename <- tail(strsplit(GEDI2A_link, '/')[[1]], n = 1)
+  gedilevel2a <-rGEDI::readLevel2A(level2Apath = paste0(outdir,"/",GEDI2A_filename))
+  new_d <-gsub("\\.","_",d)
+  GEDI2A_clip_name <-paste0(outdir,"/level2a_clip_bb_", new_d,".h5")
+  level2a_clip_bb <- rGEDI::clipLevel2A(gedilevel2a, xmin, xmax, ymin, ymax, output=GEDI2A_clip_name)
+  level2AM<-rGEDI::getLevel2AM(level2a_clip_bb)
+  level2AM_filtered <- level2AM[level2AM$rh100 != 0, ]
+  level2A_dt <- rbind(level2A_dt, level2AM_filtered) 
+}
+```
+
+#### Option 2) 
+
+If you do not want to download all GEDI data and just use clipped data that I already uploaded in Github, then use this code. This for loop load the GEDI data you saved in your directory and clip it by bounding box that you set before. 
+
+
+```{r echo=T, results='hide', message=F, warning=F}
+
+level2A_dt <- NULL # the dataframe to be filled
+
+for (d in datetime_v){
+  new_d <-gsub("\\.","_",d)
+  GEDI2A_clip_name <-paste0(outdir,"/level2a_clip_bb_", new_d,".h5")
+  gedilevel2a <-readLevel2A(level2Apath = GEDI2A_clip_name)
+  level2AM<-getLevel2AM(gedilevel2a)
+  level2AM_filtered <- level2AM[level2AM$rh100 != 0, ]
+  level2A_dt <- rbind(level2A_dt, level2AM_filtered) 
+}
+```
+
+```{r}
+head(level2A_dt[order(-level2A_dt$rh100), ],1)
+```
+
+## 6. Intersect and visualize the data 
+
+Before intersecting the GEDI data by the polygon, convert them to sf object
+
+```{r}
+
+# Convert data table to data frame
+level2A_df <- as.data.frame(level2A_dt)
+# Transform the date frame as sf object 
+level2A_sf <- st_as_sf(level2A_df, coords = c("lon_lowestmode","lat_lowestmode"), remove = FALSE)
+# Match the coordinate Reference System 
+st_crs(level2A_sf) <- st_crs(forests)
+
+```
+
+Create a function of intersect and use the function. 
+
+```{r}
+intersect_f <- function(GEDI_point, polygon) {
+  # Match the coordinate Reference System 
+  st_crs(GEDI_point) <- st_crs(polygon)
+  # Intersect the GEDI points by a polygon  
+  intersected <- GEDI_point[st_intersects(GEDI_point, polygon) %>% lengths > 0,] 
+  return(intersected)
+}
+
+# Intersect the GEDI data by forest areas  
+level2A_forest <- intersect_f(level2A_sf, forests)
+
+```
+
+Subset forest GEDI data where quality flag 1 is. A quality flag value of 1 indicates the laser shot meets criteria based on energy, sensitivity, amplitude, and real-time surface tracking quality.
+
+```{r}
+level2A_forest_qf_1 <- level2A_forest[level2A_forest$quality_flag == 1, ]
+
+# Intersect the GEDI data by forest disturbances  
+level2A_disturbance_qf_1<- intersect_f(level2A_forest_qf_1, forest_disturbance)
+```
+
+Visualize GEDI clipped data by leaflet (forest/disturbance GEDI data with quality flag = 1 data)
+When cursor is on the point, you can see the beam numbers. If the pulses are on the same line, they have same beam number. 
+```{r include=TRUE}
+leaflet() %>% addTiles() %>%
+  addCircleMarkers(level2A_forest$lon_lowestmode,
+                   level2A_forest$lat_lowestmode,
+                   radius = 1,
+                   opacity = 1,
+                   color = "green",
+                   label = paste0("Beam number: ", level2A_forest$beam))  %>%
+  addCircleMarkers(level2A_forest_qf_1$lon_lowestmode,
+                   level2A_forest_qf_1$lat_lowestmode,
+                   radius = 1,
+                   opacity = 0.5,
+                   color = "orange",
+                   label = paste0("Beam number: ", level2A_forest_qf_1$beam))  %>%
+  addCircleMarkers(level2A_disturbance_qf_1$lon_lowestmode,
+                   level2A_disturbance_qf_1$lat_lowestmode,
+                   radius = 1,
+                   opacity = 0.9,
+                   color = "cyan",
+                   label = paste0("Beam number: ", level2A_disturbance_qf_1$beam))  %>%
+  addScaleBar(options = list(imperial = FALSE)) %>%
+  addProviderTiles(providers$Esri.WorldImagery)  %>%
+  addLegend(colors = c("green","orange","cyan"), 
+            labels= c("All forest GEDI data" ,"qf = 1 forest GEDI","qf = 1 forest disturbance GEDI"),
+            title ="GEDI LEVEL2A") 
+```
+Visualize GEDI quality flag 1 data with forest disturbance polygon using leaflet
+
+```{r include=TRUE}
+# clip forest disturbance polygon by bounding box of GEDI forest disturbance data
+forest_disturbance_clipped <- st_crop(forest_disturbance, st_bbox(level2A_disturbance_qf_1))
+# This time, rh100 values will pop up if you click the points. 
+rh100_popup <- paste0("<strong>rh100: </strong>", level2A_disturbance_qf_1$rh100)
+
+leaflet(level2A_disturbance_qf_1) %>%  addTiles() %>%
+  addPolygons(data = forest_disturbance_clipped, # add forest disturbance polygon
+              opacity = 0.7,
+              smoothFactor = 0.5,
+              color = "white")  %>%
+  addCircleMarkers(~lon_lowestmode, # add GEDI pulse data 
+                   ~lat_lowestmode,
+                   fillColor = "cyan",
+                   fillOpacity = 0.8,
+                   radius = 3,
+                   stroke = F,
+                   popup = rh100_popup)  %>%
+  addProviderTiles(providers$Esri.WorldImagery) %>% 
+  addLegend("bottomright",  # location of legend
+            colors = c("white","cyan"), 
+            labels= c("disturbance area", "GEDI pulses")
+            )
+```
+
+## 7. Plot RH Metrics Transects
+
+### Background information of GEDI L2A DATA 
+The GEDI L2A data product provides relative height (RH) metrics, which are “lidar perceived” metrics.
+The RH metrics are intended for vegetated surfaces. So it results over bare/water surfaces are still valid but may present some confusing results. The lower RH metrics (e.g., RH10) will often have negative values, particularly in low canopy cover conditions. 
+This is because a relatively high fraction of the waveform energy is from the ground and below elev_lowestmode. 
+For example, if the ground return contains 30% of the energy, then RH1 through 15 are likely to be below 0 since half of the ground energy from the ground return is below the center of the ground return, which is used to determine the mean ground elevation in the footprint (elev_lowestmode).
+
+Each GEDI shot has a unique shot identifier (shot number).
+
+Option(1) you can choose a certain shot number that you analyze like this 
+
+```{r}
+shot <- 49580000200141006 
+# 4958 : Orbit Number 
+# 00 : Beam Number # Same beam number means they are in the same line 
+# 0: Reserved for future use 
+# 02: Sub-orbit Granule Number 
+# 001 : Minor frame number 
+# 41006 : Shot index 
+```
+Option (2) or you can choose one random shot number using filter function in dplyr 
+
+```{r}
+# At first, we add new column for the orbit 
+level2A_forest_qf_1$orbit_number <- level2A_forest_qf_1$shot_number*10^-13
+# reorder column. So the last column (orbit_number) becomes the first column. 
+level2A_forest_qf_1 <- level2A_forest_qf_1 %>% dplyr::select(orbit_number, everything())
+
+# see which orbit numbers we have 
+dplyr::distinct(level2A_forest_qf_1, orbit_number) # same as unique function 
+# see which beams has my orbit number
+level2A_forest_qf_1 %>% dplyr::filter(orbit_number == 4958) %>% dplyr::distinct(beam)   
+# choose a random shot_number from the orbit and beam you selected
+level2A_forest_qf_1 %>% dplyr::filter(orbit_number == 4958 & beam == "BEAM0000") %>% 
+  dplyr::sample_n(1) %>% dplyr::select(shot_number) 
+# because it is still a sf object, we have to extract shot_number using st_set_geometry 
+shot <- (st_set_geometry(level2A_forest_qf_1, NULL) %>% 
+  dplyr::filter(orbit_number == 4958 & beam == "BEAM0000") %>% 
+  dplyr::sample_n(1) %>% 
+  dplyr::select(shot_number))$shot_number 
+
+shot
+```
+In order to plot the RH metrics, you also need to import the elevation recorded at elev_lowestmode (the first elevation recorded) and elev_highestreturn 
+```{r}
+# Grab the elevation recorded at the start and end of the RH metrics
+shot_subset <- level2A_forest_qf_1[level2A_forest_qf_1$shot_number == shot, ]
+(zElevation <- shot_subset$elev_lowestmode)  # Elevation
+(zTop <- shot_subset$elev_highestreturn) # Elevation Highest Return
+```
+
+Below processes are for plotting a line plot showing the elevation at each percentile for the selected shot using ggplot.
+
+```{r}
+# At first, select all RH interval columns from shot_subset dataframe  
+rh <- shot_subset[ ,grepl("rh", names(shot_subset))] 
+# transpose the dataframe (columns become rows)
+rh_t <- as.data.frame(t(rh)) 
+# remove the last row (geometry)
+rh_t <- head(rh_t, -1)
+# rename the column
+names(rh_t)[1] <- "y_value" 
+# I want to set digits to 9
+options(digits=9)
+# Convert canopy height to canopy elevation by adding the ground elevation to each RH interval. 
+rh_t$y_value <- as.numeric(rh_t$y_value) + zElevation 
+# Add a row for percentile
+rh_t$x_value <- 0:(nrow(rh_t)-1)
+```
+
+Plot the relative cumulative RH profile line graph.
+
+```{r ,message=F, warning=F}
+ggplot(data=rh_t, aes(x=x_value, y=y_value)) +
+  geom_line(color = "darkgreen", size = 1.5) + coord_fixed(ratio=4) +
+  # add some horizontal lines such as ground elevation, highest reflecting surface height, 
+  # the relative height metrics at each quartile
+  geom_hline(aes(yintercept=zElevation), color = "brown") + 
+  annotate(geom="text", label='Ground return', x=80, y=zElevation, vjust=-0.5, color ="brown", size=3)+
+  geom_hline(aes(yintercept=rh_t['rh25','y_value']), color="steelblue3") + 
+  annotate(geom="text", label='rh25', x=15, y=rh_t['rh25','y_value'], vjust=-0.5, color ="steelblue3", size=3) +
+  geom_hline(aes(yintercept=rh_t['rh50','y_value']), color="mediumblue") + 
+  annotate(geom="text", label='rh50', x=15, y=rh_t['rh50','y_value'], vjust=-0.5, color ="mediumblue", size=3) +
+  geom_hline(aes(yintercept=rh_t['rh75','y_value']), color="royalblue4") + 
+  annotate(geom="text", label='rh75', x=15, y=rh_t['rh75','y_value'], vjust=-0.5, color ="royalblue4", size=3) +
+  geom_hline(aes(yintercept=rh_t['rh100','y_value']), color="black") + 
+  annotate(geom="text", label='rh100', x=15, y=rh_t['rh100','y_value'], vjust=-0.5, color ="black", size=3) +
+  ggtitle('GEDI L2A Relative Height Metrics (0-100)') + # title 
+  xlab('Percent Energy Returned') + # x-axis label
+  ylab('Elevation (m)') + # y-axis label
+  lims(y = c(rh_t$y_value[1] -1, rh_t$y_value[nrow(rh_t)] +1)) + # set y-axis scale 
+  theme_light() + # add a theme
+  theme(plot.title = element_text(hjust = 0.5),# center the title
+        aspect.ratio=5/3)  # set the plot ratio
+```
+
+## 8. Plot Beam Transects
+
+This time a different orbit number and beam are chosen. The reason why we set a certain orbit number and a certain beam number is, we want to plot relative height metrics with elevation on the same line of GEDI pulses. 
+Of course, you can change orbit number or beam number.
+
+```{r message=F, warning=F}
+shot_number_df <- st_set_geometry(level2A_forest_qf_1, NULL) %>%  
+  dplyr::filter(orbit_number == 5187 & beam == "BEAM0010") %>% 
+  dplyr::filter(row_number()==1 | row_number()==n()) %>% 
+  dplyr::select(shot_number) 
+
+# Subset the rows containing the shot numbers we chose
+level2A_forest_qf_1_df_subset<- subset(as.data.frame(level2A_forest_qf_1), 
+                  shot_number > shot_number_df[1,1] & shot_number < shot_number_df[2,1])
+
+# y-axis will be canopy height. 
+# we make a new data frame and add only canopy height data as a column 
+rh_df<- level2A_forest_qf_1_df_subset%>% dplyr::select(c(rh0:rh100))
+# column and rows are changed (transpose)
+rh_df_t <- data.table(rhs = c(t(rh_df)))
+
+# we will plot the x-axis as distance. 
+# So, calculate the distance between pulses 
+distance <- as.numeric(diff(level2A_forest_qf_1_df_subset$shot_number))
+distance <- c(0, distance) 
+distance <- cumsum(distance)
+# and add the distance as a new column. 
+# Because GEDI Shots are spaced 60m apart, we multiply 60. 
+rh_df_t <- cbind(rh_df_t, distance_pulses= rep(distance*60, each = ncol(rh_df)))
+
+# Plot canopy height vs. shot index as a scatter plot.
+ggplot(rh_df_t , aes(x = distance_pulses, y = rhs)) +
+  geom_point(color='darkgreen', alpha=0.3, size =1.5 ) +
+  ggtitle('Relative Height Metrics (0-100)') +
+  xlab('Distance Along Transect (m)') + ylab('Canopy Height (m)') +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(color="azure4", size=14, face="bold.italic",hjust = 0.5),
+    axis.title.x = element_text(color="azure4"),
+    axis.title.y = element_text(color="azure4"))
+```
+
+## 9. Plot RH Metrics Transects and Elevation
+
+Now, we plot RH metrics adding elevation to get a better idea of the overall three-dimensional structure of this transect.
+
+```{r out.width="80%", message=F, warning=F}
+# add elevation to rh 0-100 data frame
+rh_df_elv <- rh_df + level2A_forest_qf_1_df_subset$elev_lowestmode
+# column and rows are changed (transpose)
+rh_df_elv_t <- data.table(rhs = c(t(rh_df_elv)))
+# add x axis distance values 
+rh_df_elv_t <- cbind(rh_df_elv_t, distance_pulses= rep(distance*60, each = ncol(rh_df_elv)))
+
+# create a data frame for elevation line plot 
+elv_df<- level2A_forest_qf_1_df_subset%>% dplyr::select(c(elev_lowestmode))
+# add distance
+elv_df$dist <- distance*60
+
+# the main plot with all rh0-100 metrics with elevation
+p_big <- ggplot(rh_df_elv_t , aes(x = distance_pulses, y = rhs)) +
+            geom_point(aes(color='RH 0-100'), alpha=0.2, size =1.5 ) + #scatter plot
+            geom_line(data=elv_df, aes(x=dist, y=elev_lowestmode, color="Ground Elevation" )) + #line plot
+            scale_color_manual(values = c("Ground Elevation" = "goldenrod2", "RH 0-100" = "darkgreen")) + #add legend manually
+            labs(title = "Relative Height Metrics (0-100) and Elevation", #title
+                 subtitle ="(orbit: 5187, beam: BEAM0010)") + #subtitle 
+            xlab('Distance Along Transect (m)') + ylab('Canopy Height (m)') + #axis labels
+            theme_linedraw() + #theme
+            geom_rect(aes(xmin = 2600, xmax = 5100, ymin =365, ymax = 425), color = "lightblue4", alpha = 0) + #where we zoom in
+            theme( # additional visualization elements like color, size of font...  
+              plot.title = element_text(color="lightsteelblue4", size=18, face="bold"),
+              plot.subtitle =  element_text(color="lightsteelblue4", size=11),
+              axis.title.x = element_text(color="lightsteelblue4", face="bold", size =13),
+              axis.title.y = element_text(color="lightsteelblue4", face="bold", size = 13),
+              legend.position="bottom",legend.box = "horizontal", 
+              legend.title = element_blank(),
+              legend.background = element_rect(fill = "NA"))
+
+# the zoomed small plot to analyze more exactly
+p_small <- ggplot(rh_df_elv_t , aes(x = distance_pulses, y = rhs)) +
+  geom_point(color='darkgreen', alpha=0.2, size =1.5 ) + 
+  geom_line(data=elv_df, aes(x=dist, y=elev_lowestmode), color="goldenrod2" ) + 
+  theme_minimal() +
+  xlim (2600, 5100) +
+  ylim (365, 425) +
+  theme_void()
+
+# please zoom the plot! 
+# now we visualize them   
+p_big + 
+  annotation_custom(ggplotGrob(p_small), xmin = 1300, xmax = 6400, ymin = 220, ymax = 325) +
+  geom_rect(aes(xmin = 1300, xmax = 6400, ymin = 220, ymax = 325), 
+            color='lightblue4', linetype='solid', alpha=0, lwd = 0.1) +
+  geom_path(aes(x,y,group=grp), color ="lightblue4",
+            data=data.frame(x = c(1300,2600,6400,5100), y=c(325,365,325,365),grp=c(1,1,2,2)),
+            linetype='solid') +
+  geom_curve(
+    aes(x = 4000, y = 238, xend = 3000, yend = 255),
+    color = "lightblue4",
+    curvature = -0.2,
+    arrow = arrow(length = unit(0.03, "npc"))
+  ) +
+  annotate("text", x =5050, y=236, label = "forest disturbance!",color = "lightblue4", size = 3)
+```
+
+
+## 9. Statistics of GEDI-derived Elevation and Height Metrics (Level2A)
+
+We will create a data frame consisting of NDVI and rh100. 
+
+(1) create NDVI column 
+```{r}
+# Extract raster value (NDVI) by points (GEDI shots) 
+disturbance_ndvi_df <- as.data.frame(raster::extract(ndvi_19, level2A_disturbance_qf_1))
+# Rename the column name
+colnames(disturbance_ndvi_df) <- "NDVI" 
+# change the NDVI value to float (To minimize the size of image, I downloaded the Sentinel-2
+# Images as integer) 
+disturbance_ndvi_df$NDVI <-(disturbance_ndvi_df$NDVI)/10000
+```
+(2) create rh100 column
+
+```{r}
+# add rh100 for statistical analysis 
+disturbance_ndvi_df$rh100 <- level2A_disturbance_qf_1$rh100
+```
+(3) create shot_number column which will be removed later 
+```{r}
+# we need this column only to delete outlier values. 
+disturbance_ndvi_df$shot_number <- level2A_disturbance_qf_1$shot_number
+# (*) remove the values that matches with outliers from the original dataframe. 
+# This will be used later for the statistical analysis. 
+level2A_forest_qf_1_no_disturbance <- level2A_forest_qf_1[!(level2A_forest_qf_1$shot_number %in% disturbance_ndvi_df$shot_number),]
+
+```
+(4) save outliers as dataframe 
+```{r}
+# (why outliers here? some of pulses were edge of disturbance areas and show very high values.)
+outlier_disturbance_ndvi_df <- disturbance_ndvi_df[disturbance_ndvi_df$rh100 %in% boxplot.stats(disturbance_ndvi_df$rh100)$out,]
+```
+
+(5) destroy outliers from my precious dataframe 
+```{r}
+# remove outliers and save it as dataframe
+disturbance_ndvi_df <- disturbance_ndvi_df[!disturbance_ndvi_df$rh100 %in% boxplot.stats(disturbance_ndvi_df$rh100)$out,]
+```
+(6) now remove the shot_number column from disturbance dataframe 
+```{r}
+disturbance_ndvi_df <- dplyr::select(disturbance_ndvi_df, -shot_number)
+
+head(disturbance_ndvi_df,10)
+```
+
+Let's check which dataframe we created until now to get an overview. 
+(a) disturbance_ndvi_df : 2 columns (NDVI value and rh100) almost bare area because of forest disturbance  
+(b) level2A_forest_qf_1_no_disturbance : original LEVEL2A data without disturbance 
+(c) outlier_disturbance_ndvi_df :  2 columns (NDVI value and rh100) of outlier values 
+
+```{r}
+head(disturbance_ndvi_df,1)
+head(level2A_forest_qf_1_no_disturbance,1)
+head(outlier_disturbance_ndvi_df,10)
+```
+Compute summary statistics (min, max, mean, and quartiles)
+```{r}
+summary(level2A_forest_qf_1_no_disturbance$rh100)
+# Even though we already deleted disturbance values, we see still very low values 
+# what is the lowest 10 % value? 6.278
+quantile(level2A_forest_qf_1_no_disturbance$rh100, 0.1) 
+# here you can see all the values that are all low 10% of them. 
+sort(level2A_forest_qf_1_no_disturbance$rh100)[1:(length(level2A_forest_qf_1_no_disturbance$rh100)/10)]  
+```
+### why do we have a lot of low rh100 values?
+- some of forest area data from copernicus land are misclassifed. Some areas are not forest. 
+- GEDI shots are on the edge of the forest data. 
+- forest disturbance data was not highly accurate 
+- other forest disturbances were not detected.
+- disturbance data is based on medium of sentinel 2 images from May to October. Maybe some disturbance areas created in November. our GEDI data are from October to November. 
+
+Here you can see low rh100 GEDI data on the leaflet map
+```{r , message=F, warning=F}
+level2A_forest_qf_1_no_disturbance$rh100_round <- round(level2A_forest_qf_1_no_disturbance$rh100, 1)
+leaflet(data = (level2A_forest_qf_1_no_disturbance %>% filter(rh100 < 10))) %>% 
+  addProviderTiles(providers$Esri.WorldImagery) %>% #OpenStreetMap
+  addMarkers(~lon_lowestmode, ~lat_lowestmode,  
+                      label =  ~as.character(rh100_round), 
+                      labelOptions = labelOptions(noHide = T, direction = 'top', textOnly = T, textsize = "15px")) 
+```
+### Create function of plotting correlation graphs and compare the results produced by selecting different sample size. 
+Depending on the size of samples from forest disturbance GEDI data and no-disturbance GEDI data, 
+the correlation is different. 
+
+```{r out.width="100%", out.height = "500%", message=F, warning=F}
+show_cor <- function(sample_n_forest, sample_n_disturbance) {
+  forest_sample <- level2A_forest_qf_1_no_disturbance[sample(which(level2A_forest_qf_1_no_disturbance$rh100 >17), sample_n_forest), ]
+  extract_df2 <- as.data.frame(raster::extract(ndvi_19, forest_sample)) 
+  colnames(extract_df2) <- "NDVI"
+  extract_df2$NDVI <-(extract_df2$NDVI)/10000
+  extract_df2$rh100 <- forest_sample$rh100
+  extract_df2 <- extract_df2[!extract_df2$rh100 %in% boxplot.stats(extract_df2$rh100)$out,]
+  disturbance_ndvi_sample <- sample_n(disturbance_ndvi_df, sample_n_disturbance)
+  final_extract_df <- rbind(disturbance_ndvi_sample,extract_df2)
+  p_title = paste0("(", sample_n_forest, ",",sample_n_disturbance,")")
+  p <- ggscatter(final_extract_df, x = "NDVI", y = "rh100", 
+                 color = "darkslategrey",
+                 fill = "darkslategrey",
+                 repel = TRUE,
+            add = "reg.line", # Add regression line
+            conf.int = TRUE,  # Add confidence interval
+            add.params = list(color = "blue",
+                              fill = "cadetblue4"),
+            size = 0.8,
+            cor.coef = TRUE,
+            cor.coef.size = 2.5, 
+            cor.coeff.args = list(method = "pearson"),
+            xlab = "NDVI", ylab = "rh100", title =  p_title,
+            ggtheme = theme(plot.title = element_text(hjust = 0.5, size=8),
+                            axis.title.x  = element_text(size = 6),
+                            axis.title.y  = element_text(size = 6),
+                            ))
+  
+  return(p)
+}
+library(patchwork)
+p1 <- show_cor(30,30)
+p2 <- show_cor(60,30)
+p3 <- show_cor(200,30)
+p4 <- show_cor(90,10)
+p5 <- show_cor(300,10)
+p6 <- show_cor(400,0)
+
+(p1 + p2 +p3+ p4+ p5+p6) + plot_layout(ncol = 3, nrow = 2,)+ plot_annotation(
+  title = 'Correlation comparison by sample size',
+  subtitle = "(sample size of rh100 > 17, sample size of forest disturbance)",
+  caption = paste0("Whole sample size: (" , nrow(level2A_forest_qf_1_no_disturbance), ",",nrow(disturbance_ndvi_df),")")
+)
+
+
+```
