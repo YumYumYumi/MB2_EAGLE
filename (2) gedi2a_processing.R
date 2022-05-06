@@ -43,19 +43,19 @@ datetime_v <- c("2019.10.28", "2019.11.06", "2019.11.12", "2019.11.23", "2019.11
 # -----------------------------------IMPORT POLYGONS------------------------------------------- #
 # Import forest polygons as sf object 
 # Data Provider (1) forest type raster data inside of bounding box is converted to shapefile 
-angiosperms <- st_read("forest1_vec_fixed.shp") # vector of broad-leaved forests
-gymnosperms <- st_read("forest2_vec_fixed.shp") # vector of coniferous forests
+angiosperms <- st_read("./data/forest1_vec_fixed.shp") # vector of broad-leaved forests
+gymnosperms <- st_read("./data/forest2_vec_fixed.shp") # vector of coniferous forests
 
 # Combine two sf objects
 forests <- rbind(angiosperms,gymnosperms)
 
 # Data Provider (2) median NDVI (Normalized Difference Vegetation Index) image 
 # of Sentinel-2 (May to October, 2019) 
-ndvi_19 <- brick("2019s2_clipped_ndvi.tif")
+ndvi_19 <- brick("./data/2019s2_clipped_ndvi.tif")
 
 
 # Above median NDVI is converted to shapefile and less than 0.5 NDVI values are extracted inside of forest area. 
-forest_disturbance <- st_read("ndvi19_disturbance_vec_0_fixed.shp")
+forest_disturbance <- st_read("./data/ndvi19_disturbance_vec_0_fixed.shp")
 
 
 # -----------------------------------READ AND CLIP GEDI DATA------------------------------------------- #
@@ -75,7 +75,7 @@ for (d in datetime_v){
   GEDI2A_filename <- tail(strsplit(GEDI2A_link, '/')[[1]], n = 1)
   gedilevel2a <-readLevel2A(level2Apath = paste0(outdir,"/",GEDI2A_filename))
   new_d <-gsub("\\.","_",d)
-  GEDI2A_clip_name <-paste0(outdir,"/level2a_clip_bb_", new_d,".h5")
+  GEDI2A_clip_name <-paste0(outdir,"/data/level2a_clip_bb_", new_d,".h5")
   level2a_clip_bb <- clipLevel2A(gedilevel2a, xmin, xmax, ymin, ymax, output=GEDI2A_clip_name)
   level2AM<-getLevel2AM(level2a_clip_bb)
   level2AM_filtered <- level2AM[level2AM$rh100 != 0, ]
@@ -88,7 +88,7 @@ for (d in datetime_v){
 level2A_dt <- NULL # the dataframe to be filled
 for (d in datetime_v){
   new_d <-gsub("\\.","_",d)
-  GEDI2A_clip_name <-paste0(outdir,"/level2a_clip_bb_", new_d,".h5")
+  GEDI2A_clip_name <-paste0(outdir,"/data/level2a_clip_bb_", new_d,".h5")
   gedilevel2a <-readLevel2A(level2Apath = GEDI2A_clip_name)
   level2AM<-getLevel2AM(gedilevel2a)
   level2AM_filtered <- level2AM[level2AM$rh100 != 0, ]
@@ -453,7 +453,7 @@ show_cor <- function(sample_n_forest, sample_n_disturbance) {
   extract_df2 <- extract_df2[!extract_df2$rh100 %in% boxplot.stats(extract_df2$rh100)$out,]
   disturbance_ndvi_sample <- sample_n(disturbance_ndvi_df, sample_n_disturbance)
   final_extract_df <- rbind(disturbance_ndvi_sample,extract_df2)
-  p_title = paste0("(", "sample size of rh100 > 17: ", sample_n_forest, ", ", "sample size of forest disturbance:",sample_n_disturbance,")")
+  p_title = paste0("(", sample_n_forest, ",",sample_n_disturbance,")")
   p <- ggscatter(final_extract_df, x = "NDVI", y = "rh100", 
                  color = "darkslategrey",
                  fill = "darkslategrey",
@@ -461,26 +461,32 @@ show_cor <- function(sample_n_forest, sample_n_disturbance) {
                  add = "reg.line", # Add regression line
                  conf.int = TRUE,  # Add confidence interval
                  add.params = list(color = "blue",
-                                   fill = "lightgray"),
-                 cor.coef = TRUE, 
-                 cor.method = "pearson",
+                                   fill = "cadetblue4"),
+                 size = 0.8,
+                 cor.coef = TRUE,
+                 cor.coef.size = 2.5, 
+                 cor.coeff.args = list(method = "pearson"),
                  xlab = "NDVI", ylab = "rh100", title =  p_title,
-                 ggtheme = theme(plot.title = element_text(hjust = 0.5, size=11),
-                                 axis.title.x  = element_text(size = 8),
-                                 axis.title.y  = element_text(size = 8)))
+                 ggtheme = theme(plot.title = element_text(hjust = 0.5, size=8),
+                                 axis.title.x  = element_text(size = 6),
+                                 axis.title.y  = element_text(size = 6),
+                 ))
+  
   return(p)
 }
-
+library(patchwork)
 p1 <- show_cor(30,30)
 p2 <- show_cor(60,30)
 p3 <- show_cor(200,30)
 p4 <- show_cor(90,10)
 p5 <- show_cor(300,10)
 p6 <- show_cor(400,0)
-ggarrange(p1, p2, p3, p4, p5, p6,
-          ncol = 2, nrow = 3, font.label=list(color="black",size=9))
 
-
+(p1 + p2 +p3+ p4+ p5+p6) + plot_layout(ncol = 3, nrow = 2,)+ plot_annotation(
+  title = 'Correlation comparison by sample size',
+  subtitle = "(sample size of rh100 > 17, sample size of forest disturbance)",
+  caption = paste0("Whole sample size: (" , nrow(level2A_forest_qf_1_no_disturbance), ",",nrow(disturbance_ndvi_df),")")
+)
 # Shapiro-Wilk normality test for mpg
 #shapiro.test(final_extract_df$NDVI) # => p = 0.1229
 # Shapiro-Wilk normality test for wt

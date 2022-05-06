@@ -124,17 +124,17 @@ datetime_v <- c("2019.10.28", "2019.11.06", "2019.11.12", "2019.11.23", "2019.11
 ```{r echo=T, results='hide', message=F, warning=F}
 # Import forest polygons as sf object 
 # Data Provider (1) Shapefile converted from forest type raster data inside of bounding box. 
-angiosperms <- sf::st_read("forest1_vec_fixed.shp") # vector of broad-leaved forests
-gymnosperms <- sf::st_read("forest2_vec_fixed.shp") # vector of coniferous forests
+angiosperms <- sf::st_read("./data/forest1_vec_fixed.shp") # vector of broad-leaved forests
+gymnosperms <- sf::st_read("./data/forest2_vec_fixed.shp") # vector of coniferous forests
 
 # Combine two sf objects
 forests <- rbind(angiosperms,gymnosperms)
 
 # Data Provider (2) median NDVI (Normalized Difference Vegetation Index) image of Sentinel-2 (May to October, 2019) 
-ndvi_19 <- raster::brick("2019s2_clipped_ndvi.tif")
+ndvi_19 <- raster::brick("./data/2019s2_clipped_ndvi.tif")
 
 # Above median NDVI is converted to shapefile and less than 0.5 NDVI values are extracted inside of forest area. 
-forest_disturbance <- sf::st_read("ndvi19_disturbance_vec_0_fixed.shp")
+forest_disturbance <- sf::st_read("./data/ndvi19_disturbance_vec_0_fixed.shp")
 ```
 
 
@@ -220,7 +220,7 @@ for (d in datetime_v){
   GEDI2A_filename <- tail(strsplit(GEDI2A_link, '/')[[1]], n = 1)
   gedilevel2a <-rGEDI::readLevel2A(level2Apath = paste0(outdir,"/",GEDI2A_filename))
   new_d <-gsub("\\.","_",d)
-  GEDI2A_clip_name <-paste0(outdir,"/level2a_clip_bb_", new_d,".h5")
+  GEDI2A_clip_name <-paste0(outdir,"/data/level2a_clip_bb_", new_d,".h5")
   level2a_clip_bb <- rGEDI::clipLevel2A(gedilevel2a, xmin, xmax, ymin, ymax, output=GEDI2A_clip_name)
   level2AM<-rGEDI::getLevel2AM(level2a_clip_bb)
   level2AM_filtered <- level2AM[level2AM$rh100 != 0, ]
@@ -239,7 +239,7 @@ level2A_dt <- NULL # the dataframe to be filled
 
 for (d in datetime_v){
   new_d <-gsub("\\.","_",d)
-  GEDI2A_clip_name <-paste0(outdir,"/level2a_clip_bb_", new_d,".h5")
+  GEDI2A_clip_name <-paste0(outdir,"/data/level2a_clip_bb_", new_d,".h5")
   gedilevel2a <-readLevel2A(level2Apath = GEDI2A_clip_name)
   level2AM<-getLevel2AM(gedilevel2a)
   level2AM_filtered <- level2AM[level2AM$rh100 != 0, ]
