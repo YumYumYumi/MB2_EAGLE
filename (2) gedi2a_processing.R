@@ -1,9 +1,12 @@
 # ------------------------------------------------------------------------------------------------ #
 # Spatial and Statistical Analysis of GEDI data in R
 # Author: Hyeonmin Kang
+# Institute: EAGLE master, Julius-Maximilians-University Wuerzburg
+# Email: hyunminkang88@gmail.com
+# github: https://github.com/YumYumYumi/MB2_EAGLE
 # Operating system: Ubuntu 20.04.4 LTS
 # R version : 4.2.0 (2022-04-22)
-# Last Updated: 25/04/2022
+# Last Updated: 12/05/2022
 # Objective: The objective of this script is to visualize and analyze NASA's Global 
 # Ecosystem Dynamics Investigation (GEDI) 2A Data spatially and statistically and to detect the 
 # forest disturbance by processing GEDI 2A DATA. 
@@ -42,22 +45,29 @@ datetime_v <- c("2019.10.28", "2019.11.06", "2019.11.12", "2019.11.23", "2019.11
 
 # -----------------------------------IMPORT POLYGONS------------------------------------------- #
 # Import forest polygons as sf object 
-# Data Provider (1) forest type raster data inside of bounding box is converted to shapefile 
+# Input data (1) forest type raster data inside of bounding box is converted to shapefile 
 angiosperms <- st_read("./data/forest1_vec_fixed.shp") # vector of broad-leaved forests
 gymnosperms <- st_read("./data/forest2_vec_fixed.shp") # vector of coniferous forests
 
 # Combine two sf objects
 forests <- rbind(angiosperms,gymnosperms)
 
-# Data Provider (2) median NDVI (Normalized Difference Vegetation Index) image 
+# Input data (2) median NDVI (Normalized Difference Vegetation Index) image 
 # of Sentinel-2 (May to October, 2019) 
 ndvi_19 <- brick("./data/2019s2_clipped_ndvi.tif")
 
 
-# Above median NDVI is converted to shapefile and less than 0.5 NDVI values are extracted inside of forest area. 
+# (2) Above median NDVI is converted to shapefile and less than 0.5 NDVI values are extracted inside of forest area. 
 forest_disturbance <- st_read("./data/ndvi19_disturbance_vec_0_fixed.shp")
 
-
+# -----------------------------------PLOT MY AOI------------------------------------------- #
+#plot my area of interest 
+leaflet() %>% addTiles() %>%
+  addRectangles(
+    lng1=xmin, lat1=ymin,
+    lng2=xmax, lat2=ymax,
+    fillColor = "transparent"
+  )
 # -----------------------------------READ AND CLIP GEDI DATA------------------------------------------- #
 # Get download link for GEDI data. 
 # WARNING!! all of the GEDI data above are more than 10 GB. Check your storage space before you curse me.

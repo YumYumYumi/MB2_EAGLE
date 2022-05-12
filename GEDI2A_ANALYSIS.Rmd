@@ -67,15 +67,21 @@ knitr::opts_chunk$set(echo = TRUE)
 
 **Author**: Hyeonmin Kang 
 
+**Institute**: EAGLE master, Julius-Maximilians-University Wuerzburg
+
+**Email**: hyunminkang88@gmail.com
+
+**Github**: https://github.com/YumYumYumi/MB2_EAGLE
+
 **Operating system**: Ubuntu 20.04.4 LTS
 
 **R version**: 4.2.0 (2022-04-22)
 
-**Last Updated**: 06/05/2022
+**Last Updated**: 12/05/2022
 
 **Objective**: (1) demonstrating how to get the URL for downloading NASA's Global Ecosystem Dynamics Investigation (GEDI) Data directly from the LP DAAC Data Pool, using NASA's Common Metadata Repository (CMR). (2) visualizing and analyzing NASA's Global Ecosystem Dynamics Investigation (GEDI) 2A Data spatially and statistically. (3) detecting the forest disturbance by processing GEDI 2A DATA. 
 
-**Data Provider**: (1) https://land.copernicus.eu/pan-european/high-resolution-layers/forests (2) https://sentinel.esa.int/web/sentinel/user-guides/sentinel-2-msi/product-types/level-2a
+**Additional Input Data Provider**: (1) https://land.copernicus.eu/pan-european/high-resolution-layers/forests (2) https://sentinel.esa.int/web/sentinel/user-guides/sentinel-2-msi/product-types/level-2a
 
 
 ## 1. Install and load required packages 
@@ -137,7 +143,17 @@ ndvi_19 <- raster::brick("./data/2019s2_clipped_ndvi.tif")
 forest_disturbance <- sf::st_read("./data/ndvi19_disturbance_vec_0_fixed.shp")
 ```
 
+This is my area of interest(AOI). South North Rhine-Westphalia and Lower Saxony, Germany. 
 
+```{r echo=T, message=F, warning=F}
+#plot my area of interest 
+leaflet() %>% addTiles() %>%
+  addRectangles(
+    lng1=xmin, lat1=ymin,
+    lng2=xmax, lat2=ymax,
+    fillColor = "transparent"
+  )
+```
 ## 4. Download GEDI data URL 
 Here, we create a function to query CMR. 
 
