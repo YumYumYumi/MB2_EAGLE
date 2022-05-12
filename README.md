@@ -11,4 +11,6 @@
 
 #### Overview of Workflow: At first, we will get URLs for downloading GEDI data. (Currently, there is no way to import GEDI Data into R directly). After downloading GEDI Data (file format: HDF5) using URLs, we will load GEDI data as dataframe by using rGEDI package. Unfortunately, only a couple of functions from the rGEDI package are available. So we have to make some functions by ourselves to process GEDI data. We will visualize GEDI shots inside of aoi, qualitative GEDI shots, and qualitative GEDI shots representing forest disturbance using Leaflet package. Next, we will plot a relative cumulative RH profile line graph by randomly picking one sample GEDI shot and RH Metrics Transects with elevation by choosing one beam. Finally, statistical analysis is performed.  
 
+#### What is GEDI? GEDI uses near-infrared lasers, is about the size of a refrigerator, has 3 lasers, illuminates 25m diameter footprints on Earth’s surface, and measures forest canopy height. (https://gedi.umd.edu/)
+
 Please run r scirpts in this order : (1) download_gedi.R (2) gedi2a_processing.R
