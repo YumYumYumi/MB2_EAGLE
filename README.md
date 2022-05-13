@@ -13,4 +13,5 @@
 
 #### What is GEDI? GEDI uses near-infrared lasers, is about the size of a refrigerator, has 3 lasers, illuminates 25m diameter footprints on Earth’s surface, and measures forest canopy height. (https://gedi.umd.edu/)
 
-Please run r scirpts in this order : (1) download_gedi.R (2) gedi2a_processing.R
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!Please run r scirpts in this order : (1) download_gedi.R (2) gedi2a_processing.R
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!If you do not want to run all the codes, I recommend reading html file. 
